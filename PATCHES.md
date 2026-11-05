@@ -87,6 +87,22 @@ A basis of its own, on the input the parent passes down:
 
 ## Notes for whoever picks this up
 
+- **The change above was written and measured, on this branch, and it is not the whole answer.** Adding
+  `percentage_block_basis`, reading it at `container_percentage_resolution_height` and carrying it in the
+  `CacheKey` compiled cleanly (ten literal sites in this crate, one in `blitz-dom`'s `remeasure_spanners`)
+  and the plumbing demonstrably works: an unrelated pair (`…children-height-007`) moved by exactly the
+  4106px that changing the children's `parent_size.height` moves it ✓ so the value does reach the children.
+  But `-001`, `-002` and `-003` came back **byte-identical** to their baselines (209 / 39720 / 51537 px):
+  a child's `height: 50%` did not change at all. Reverted rather than left half-in, since a field that
+  moves padding and nothing else is a trap for the next reader.
+- The next lead, and the reason both this and the `parent_size` attempt were inert for heights: the
+  percentage is probably resolved before taffy ever sees it, in the style wrapper. `stylo_taffy::wrapper`
+  hands taffy a `LengthPercentage` derived from stylo's computed values, and it already carries its own
+  `percent_basis` (used for padding only ✓ `fn padding()`). Look for where a computed `height` percentage
+  is turned into a resolved length in that wrapper — if it resolves against the container's height at
+  that point, no `LayoutInput` field downstream can override it, and the basis has to be passed into the
+  style wrapper instead (which is a `deps/blitz` change, not a taffy one ✓ and would also explain why the
+  field behaves for padding and not for height).
 - The corpus at this revision is worth 5061 pairs; a percentage-basis change reaches every box with a
   percentage height **inside any columned or paged container**, which is a wide blast radius in a
   direction the corpus has not been probed from. Treat `-002` and `-003` as *separate* mechanisms if they
