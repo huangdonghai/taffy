@@ -7,6 +7,13 @@ differences, none stale, no pair broken).
 
 ## Why this fork exists
 
+> **Read this first: the premise below was measured false, and the fork carries no source patch.**
+> A percentage block size inside a fragmentainer does *not* resolve against that fragmentainer's depth;
+> for a columned box it resolves against the whole container, as `css-multicol`'s own tests state, and
+> the pair quoted below as the reason for this branch was failing on a `box-sizing` error in
+> `deps/blitz` instead. See "What happened next" at the end. Everything between here and there is kept
+> as the record of a hypothesis, not as an open work order.
+
 Inside a fragmentainer — a column, a page — a percentage block size has to resolve against the
 **fragmentainer's depth**, while the box being fragmented keeps its **own height**. In a `columns: 2` box
 of 200px, a child of `height: 50%` is 50px: 50% of the 100px column, not of the 200px container
@@ -75,26 +82,47 @@ A basis of its own, on the input the parent passes down:
 
 ## Acceptance
 
-- `css-multicol/multicol-span-all-children-height-001` (209 px), `-002` (39720 px), `-003` (51537 px) —
-  these three are the pairs the change is *for*.
-- The pin `cuotuo-gpui probe::percentage_heights_in_a_column_ask_for_the_container` **must fail** ✓ it
-  asserts today's basis deliberately, and its comment says why: it exists to make this change visible
-  rather than silent. Update it in the same commit, keeping its shape (assert the fragmentainer's depth,
-  not the container's).
-- Gates, in this order: `cargo test -p blitz-dom` (102), `cargo test -p cuotuo-gpui` (38),
+- ~~`css-multicol/multicol-span-all-children-height-001` (209 px), `-002` (39720 px), `-003` (51537 px)
+  — these three are the pairs the change is *for*.~~ **Retired: see "What happened next" below.** These
+  pairs needed no percentage-basis change, and this fork has no part in them.
+- ~~The pin `cuotuo-gpui probe::percentage_heights_in_a_column_ask_for_the_container` **must fail** ✓~~
+  It now asserts the rule the WPT references give (a child's percentage asks for the whole multicol) and
+  passes; it was rewritten rather than left as a marker for a change that turned out to be wrong.
+- Gates, in this order: `cargo test -p blitz-dom`, `cargo test -p cuotuo-gpui`,
   `_scratch/bulletscore.ps1 -Diff` (eight families in ~40 s), then the full corpus
   (`conformance_score -- --ignored`) against the archived score at the same revisions.
 
-## Notes for whoever picks this up
+## What happened next — the premise was wrong, and this fork is not needed for it
 
-- **The change above was written and measured, on this branch, and it is not the whole answer.** Adding
-  `percentage_block_basis`, reading it at `container_percentage_resolution_height` and carrying it in the
-  `CacheKey` compiled cleanly (ten literal sites in this crate, one in `blitz-dom`'s `remeasure_spanners`)
-  and the plumbing demonstrably works: an unrelated pair (`…children-height-007`) moved by exactly the
-  4106px that changing the children's `parent_size.height` moves it ✓ so the value does reach the children.
-  But `-001`, `-002` and `-003` came back **byte-identical** to their baselines (209 / 39720 / 51537 px):
-  a child's `height: 50%` did not change at all. Reverted rather than left half-in, since a field that
-  moves padding and nothing else is a trap for the next reader.
+The change above **was** written, measured, on this branch, and reverted: adding
+`percentage_block_basis`, reading it at `container_percentage_resolution_height` and carrying it in the
+`CacheKey` compiled cleanly (ten literal sites in this crate, one in `blitz-dom`'s `remeasure_spanners`)
+and the plumbing demonstrably worked — an unrelated pair (`…children-height-007`) moved by exactly the
+4106px a changed children's basis moves ✓ so the value did reach the children. But `-001`, `-002` and
+`-003` came back **byte-identical** (209 / 39720 / 51537 px). That was read as "the channel is elsewhere,
+try `stylo_taffy::wrapper`". It was not: **there was no basis to change.**
+
+- `-002` and `-003` say it in their own `assert`: the percentage is computed "relative to the entire
+  multicol", and their references write the children as `height: 200px` in a container whose content is
+  200px and whose columns are 100px deep — the child is spread over both columns, not one. Today's
+  container basis is the rule. The reading that sent seven rounds here came from `-001`, whose children
+  are `50%` against a reference `25%`: true, but `-001`'s column depth happens to be exactly half its
+  container, so the pair cannot tell the two rules apart. The pin used `columns: 1`, where they coincide
+  outright, and so proved nothing while appearing to pin something.
+- What `-002`/`-003` were actually failing on was in `deps/blitz`, and is now fixed there: the authored
+  `height` is the **content** box under the default `box-sizing`, while the block algorithm is handed a
+  **border box** (the width in the same call already was), so a container of `height: 200px;
+  border: 5px` measured its own content at 190px, its columns at 95, and every percentage inside at 95
+  instead of 100. Re-basing the percentage could not show up as a difference while the basis itself was
+  off by the border — which is the real reason this fork's field looked inert, and the reason the
+  `parent_size.height` attempt before it looked inert too.
+
+So: **no fifth-fork work is required for the percentage pairs, and none for anything else currently
+open** (float and abspos across pieces, the nested vertical axis, vertical columns — those need the flow
+measured per fragmentainer, which is a `blitz-dom` architecture change, not a taffy one). The open
+question for whoever reads this next is whether this fork should exist at all; the honest answer today is
+that its `percentage_block_basis` field was the only reason to pin it, that field is reverted, and the
+decision belongs above this file.
 - The next lead, and the reason both this and the `parent_size` attempt were inert for heights: the
   percentage is probably resolved before taffy ever sees it, in the style wrapper. `stylo_taffy::wrapper`
   hands taffy a `LengthPercentage` derived from stylo's computed values, and it already carries its own
